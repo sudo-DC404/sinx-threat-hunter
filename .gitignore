@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+/tmp/
+*.tmp
+
+# User data
+/threat_hunter.db
+/logs/
+/data/
+
+# Tokens
+/tmp/sinx_token
+*.token
+
+# Node modules (if frontend is built)
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/

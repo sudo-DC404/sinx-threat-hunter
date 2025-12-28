@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""
+sinX Threat Hunter - Simple CLI Tool
+Easy command-line interface for threat hunting operations
+"""
+
+import sys
+import json
+import requests
+from datetime import datetime
+
+# Configuration
+API_URL = "http://localhost:8000/api/v1"
+TOKEN_FILE = "/tmp/sinx_token"
+
+# Colors for terminal output
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+
+def print_header(text):
+    print(f"\n{Colors.BOLD}{Colors.OKCYAN}{'='*60}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.OKCYAN}{text.center(60)}{Colors.ENDC}")
+    print(f"{Colors.BOLD}{Colors.OKCYAN}{'='*60}{Colors.ENDC}\n")
+
+def print_success(text):
+    print(f"{Colors.OKGREEN}✓ {text}{Colors.ENDC}")
+
+def print_error(text):
+    print(f"{Colors.FAIL}✗ {text}{Colors.ENDC}")
+
+def print_warning(text):
+    print(f"{Colors.WARNING}⚠ {text}{Colors.ENDC}")
+
+def print_info(text):
+    print(f"{Colors.OKBLUE}ℹ {text}{Colors.ENDC}")
+
+def load_token():
+    """Load saved authentication token"""
+    try:
+        with open(TOKEN_FILE, 'r') as f:
+            return f.read().strip()
+    except:
+        return None
+
+def save_token(token):
+    """Save authentication token"""
+    with open(TOKEN_FILE, 'w') as f:
+        f.write(token)
+
+def login(username="sinX", password="Moorehaven1990"):
+    """Login to the platform"""
+    print_header("Login to sinX Threat Hunter")
+
+    try:
+        response = requests.post(
+            f"{API_URL}/auth/login",
+            data={"username": username, "password": password}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            save_token(data['access_token'])
+            print_success(f"Logged in as {username}")
+            return True
+        else:
+            print_error("Login failed - check credentials")
+            return False
+    except Exception as e:
+        print_error(f"Connection error: {e}")
+        return False
+
+def get_headers():
+    """Get API headers with auth token"""
+    token = load_token()
+    if not token:
+        print_error("Not logged in. Run: sinx-hunt login")
+        sys.exit(1)
+    return {"Authorization": f"Bearer {token}"}
+
+def show_dashboard():
+    """Display main dashboard stats"""
+    print_header("sinX Threat Hunter - Dashboard")
+
+    try:
+        headers = get_headers()
+
+        # Get stats
+        alerts = requests.get(f"{API_URL}/alerts?limit=100", headers=headers).json()
+        logs = requests.get(f"{API_URL}/siem/logs?limit=1000", headers=headers).json()
+        iocs = requests.get(f"{API_URL}/intel/iocs?limit=100", headers=headers).json()
+
+        critical_alerts = len([a for a in alerts if a.get('severity') == 'critical'])
+
+        print(f"{Colors.FAIL}{Colors.BOLD}🔴 CRITICAL ALERTS:{Colors.ENDC} {critical_alerts}")
+        print(f"{Colors.WARNING}{Colors.BOLD}🟡 TOTAL ALERTS:{Colors.ENDC} {len(alerts)}")
+        print(f"{Colors.OKBLUE}{Colors.BOLD}📊 SECURITY LOGS:{Colors.ENDC} {len(logs)}")
+        print(f"{Colors.OKCYAN}{Colors.BOLD}🎯 THREAT INTEL:{Colors.ENDC} {len(iocs)} IOCs")
+
+    except Exception as e:
+        print_error(f"Failed to load dashboard: {e}")
+
+def show_alerts(limit=10):
+    """Show active security alerts"""
+    print_header(f"Active Security Alerts (Latest {limit})")
+
+    try:
+        headers = get_headers()
+        alerts = requests.get(f"{API_URL}/alerts?limit={limit}", headers=headers).json()
+
+        if not alerts:
+            print_info("No active alerts - system is secure!")
+            return
+
+        for alert in alerts:
+            severity = alert.get('severity', 'unknown').upper()
+            if severity == 'CRITICAL':
+                color = Colors.FAIL
+            elif severity == 'HIGH':
+                color = Colors.WARNING
+            else:
+                color = Colors.OKBLUE
+
+            print(f"\n{color}{Colors.BOLD}[{severity}] {alert['title']}{Colors.ENDC}")
+            print(f"  Description: {alert.get('description', 'No description')}")
+            print(f"  Status: {alert.get('status', 'new')}")
+            print(f"  Triggered: {alert.get('triggered_at', 'unknown')}")
+
+            if alert.get('mitre_tactics'):
+                print(f"  MITRE Tactics: {', '.join(alert['mitre_tactics'])}")
+
+    except Exception as e:
+        print_error(f"Failed to load alerts: {e}")
+
+def show_logs(limit=10):
+    """Show recent security logs"""
+    print_header(f"Recent Security Logs (Latest {limit})")
+
+    try:
+        headers = get_headers()
+        logs = requests.get(f"{API_URL}/siem/logs?limit={limit}", headers=headers).json()
+
+        if not logs:
+            print_info("No logs found")
+            return
+
+        for log in logs:
+            severity = log.get('severity', 'info').upper()
+            event_type = log.get('event_type', 'unknown')
+
+            print(f"\n{Colors.BOLD}[{severity}] {event_type}{Colors.ENDC}")
+            print(f"  Message: {log.get('message', 'No message')}")
+
+            if log.get('source_ip'):
+                print(f"  Source: {log['source_ip']}", end="")
+                if log.get('source_port'):
+                    print(f":{log['source_port']}", end="")
+                print()
+
+            if log.get('dest_ip'):
+                print(f"  Destination: {log['dest_ip']}", end="")
+                if log.get('dest_port'):
+                    print(f":{log['dest_port']}", end="")
+                print()
+
+            print(f"  Time: {log.get('timestamp', 'unknown')}")
+
+    except Exception as e:
+        print_error(f"Failed to load logs: {e}")
+
+def show_iocs(limit=10):
+    """Show threat intelligence IOCs"""
+    print_header(f"Threat Intelligence - IOCs (Latest {limit})")
+
+    try:
+        headers = get_headers()
+        iocs = requests.get(f"{API_URL}/intel/iocs?limit={limit}", headers=headers).json()
+
+        if not iocs:
+            print_info("No IOCs in database")
+            return
+
+        for ioc in iocs:
+            severity = ioc.get('severity', 'unknown').upper()
+            ioc_type = ioc.get('ioc_type', 'unknown').upper()
+
+            print(f"\n{Colors.BOLD}[{severity}] {ioc_type}: {ioc['value']}{Colors.ENDC}")
+            print(f"  Threat: {ioc.get('threat_type', 'unknown')}")
+            print(f"  Confidence: {ioc.get('confidence', 0)}%")
+            print(f"  Source: {ioc.get('source', 'unknown')}")
+
+            if ioc.get('tags'):
+                print(f"  Tags: {', '.join(ioc['tags'])}")
+
+    except Exception as e:
+        print_error(f"Failed to load IOCs: {e}")
+
+def ingest_log(message, source_ip=None, dest_ip=None, dest_port=None, event_type="security_event", severity="medium"):
+    """Ingest a new security log"""
+    print_header("Ingest Security Log")
+
+    try:
+        headers = get_headers()
+        headers['Content-Type'] = 'application/json'
+
+        data = {
+            "message": message,
+            "event_type": event_type,
+            "severity": severity
+        }
+
+        if source_ip:
+            data['source_ip'] = source_ip
+        if dest_ip:
+            data['dest_ip'] = dest_ip
+        if dest_port:
+            data['dest_port'] = int(dest_port)
+
+        response = requests.post(f"{API_URL}/siem/ingest", headers=headers, json=data)
+
+        if response.status_code in [200, 201]:
+            print_success("Log ingested successfully")
+            result = response.json()
+            print_info(f"Log ID: {result.get('id', 'unknown')}")
+            print_info(f"Timestamp: {result.get('timestamp', 'unknown')}")
+        else:
+            print_error(f"Failed to ingest log: {response.status_code}")
+            print_error(response.text)
+
+    except Exception as e:
+        print_error(f"Failed to ingest log: {e}")
+
+def add_ioc(value, ioc_type="ip", threat_type="unknown", severity="medium", confidence=50, source="manual", tags=None):
+    """Add a new IOC to threat intelligence"""
+    print_header("Add Threat Intelligence IOC")
+
+    try:
+        headers = get_headers()
+        headers['Content-Type'] = 'application/json'
+
+        data = {
+            "ioc_type": ioc_type,
+            "value": value,
+            "threat_type": threat_type,
+            "severity": severity,
+            "confidence": int(confidence),
+            "source": source
+        }
+
+        if tags:
+            data['tags'] = tags.split(',') if isinstance(tags, str) else tags
+
+        response = requests.post(f"{API_URL}/intel/iocs", headers=headers, json=data)
+
+        if response.status_code in [200, 201]:
+            print_success(f"IOC added successfully: {value}")
+            result = response.json()
+            print_info(f"IOC ID: {result.get('id', 'unknown')}")
+        else:
+            print_error(f"Failed to add IOC: {response.status_code}")
+            print_error(response.text)
+
+    except Exception as e:
+        print_error(f"Failed to add IOC: {e}")
+
+def show_help():
+    """Show help message"""
+    print_header("sinX Threat Hunter - CLI Tool")
+
+    print(f"{Colors.BOLD}USAGE:{Colors.ENDC}")
+    print("  sinx-hunt <command> [options]")
+
+    print(f"\n{Colors.BOLD}COMMANDS:{Colors.ENDC}")
+    print(f"  {Colors.OKGREEN}login{Colors.ENDC}                  - Login to the platform")
+    print(f"  {Colors.OKGREEN}dashboard{Colors.ENDC}              - Show main dashboard")
+    print(f"  {Colors.OKGREEN}alerts{Colors.ENDC} [limit]        - Show active alerts (default: 10)")
+    print(f"  {Colors.OKGREEN}logs{Colors.ENDC} [limit]          - Show security logs (default: 10)")
+    print(f"  {Colors.OKGREEN}iocs{Colors.ENDC} [limit]          - Show threat intelligence (default: 10)")
+    print(f"  {Colors.OKGREEN}ingest{Colors.ENDC} <message>      - Ingest a security log")
+    print(f"  {Colors.OKGREEN}add-ioc{Colors.ENDC} <value>       - Add threat intelligence IOC")
+    print(f"  {Colors.OKGREEN}web{Colors.ENDC}                   - Show web dashboard URL")
+    print(f"  {Colors.OKGREEN}help{Colors.ENDC}                  - Show this help")
+
+    print(f"\n{Colors.BOLD}EXAMPLES:{Colors.ENDC}")
+    print("  sinx-hunt login")
+    print("  sinx-hunt dashboard")
+    print("  sinx-hunt alerts 20")
+    print("  sinx-hunt ingest \"Failed login from 1.2.3.4\"")
+    print("  sinx-hunt add-ioc 1.2.3.4")
+
+    print(f"\n{Colors.BOLD}WEB DASHBOARD:{Colors.ENDC}")
+    print("  python3 -m http.server 8080 --directory dashboard/")
+    print("  Then open: http://localhost:8080")
+
+def main():
+    if len(sys.argv) < 2:
+        show_help()
+        return
+
+    command = sys.argv[1].lower()
+
+    if command == "login":
+        login()
+    elif command == "dashboard" or command == "dash":
+        show_dashboard()
+    elif command == "alerts":
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        show_alerts(limit)
+    elif command == "logs":
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        show_logs(limit)
+    elif command == "iocs":
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        show_iocs(limit)
+    elif command == "ingest":
+        if len(sys.argv) < 3:
+            print_error("Usage: sinx-hunt ingest <message>")
+        else:
+            ingest_log(sys.argv[2])
+    elif command == "add-ioc":
+        if len(sys.argv) < 3:
+            print_error("Usage: sinx-hunt add-ioc <value>")
+        else:
+            add_ioc(sys.argv[2])
+    elif command == "web":
+        print_header("Web Dashboard")
+        print("Start the web server:")
+        print(f"  {Colors.OKGREEN}cd /home/sinexo/tools/sinx-threat-hunter{Colors.ENDC}")
+        print(f"  {Colors.OKGREEN}python3 -m http.server 8080 --directory dashboard/{Colors.ENDC}")
+        print(f"\nThen open your browser to:")
+        print(f"  {Colors.BOLD}{Colors.OKCYAN}http://localhost:8080{Colors.ENDC}")
+    elif command == "help" or command == "-h" or command == "--help":
+        show_help()
+    else:
+        print_error(f"Unknown command: {command}")
+        show_help()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n{Colors.WARNING}Interrupted{Colors.ENDC}")
+        sys.exit(0)
